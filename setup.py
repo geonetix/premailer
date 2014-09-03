@@ -17,9 +17,7 @@ long_description = open(README).read().strip() + "\n\n"
 
 
 def md2stx(s):
-    import re
-    s = re.sub(':\n(\s{8,10})', r'::\n\1', s)
-    return s
+    return re.sub(':\n(\s{8,10})', r'::\n\1', s)
 
 long_description = md2stx(long_description)
 

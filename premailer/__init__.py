@@ -1,3 +1,3 @@
-from premailer import Premailer, transform
+from .premailer import Premailer, transform
 
-__version__ = '2.5.1'
+__version__ = '3.0.1-custom'

@@ -1,23 +1,21 @@
-import threading
-try:
-    import cStringIO as StringIO
-except ImportError:  # pragma: no cover
-    import StringIO
 import cgi
 import codecs
 import gzip
 import operator
 import os
 import re
-import urllib2
-import urlparse
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
+from io import StringIO
 
 import cssutils
 from lxml import etree
 from lxml.cssselect import CSSSelector
 
 
-__all__ = ['PremailerError', 'Premailer', 'transform']
+# __all__ = ['PremailerError', 'Premailer', 'transform']
 
 
 class PremailerError(Exception):
@@ -56,8 +54,10 @@ def merge_styles(old, new, class_=''):
     new_keys = set()
     news = []
 
-    # The code below is wrapped in a critical section implemented via ``RLock``-class lock.
-    # The lock is required to avoid ``cssutils`` concurrency issues documented in issue #65
+    # The code below is wrapped in a critical section implemented via
+    # ``RLock``-class lock.
+    # The lock is required to avoid ``cssutils`` concurrency issues documented
+    # in issue #65
     with merge_styles._lock:
         for k, v in csstext_to_pairs(new):
             news.append((k.strip(), v.strip()))
@@ -79,26 +79,30 @@ def merge_styles(old, new, class_=''):
 
     # Perform the merge
     relevant_olds = groups.get(class_, {})
-    merged = [style for style in relevant_olds if style[0] not in new_keys] + news
+    merged = [style for style in relevant_olds
+              if style[0] not in new_keys] + news
     groups[class_] = merged
 
     if len(groups) == 1:
         return '; '.join('%s:%s' % (k, v) for
-                          (k, v) in sorted(groups.values()[0]))
+                         (k, v) in sorted(list(groups.values())[0]))
     else:
         all = []
-        for class_, mergeable in sorted(groups.items(),
+        for class_, mergeable in sorted(list(groups.items()),
                                         lambda x, y: cmp(x[0].count(':'),
                                                          y[0].count(':'))):
             all.append('%s{%s}' % (class_,
                                    '; '.join('%s:%s' % (k, v)
-                                              for (k, v)
-                                              in mergeable)))
+                                             for (k, v)
+                                             in mergeable)))
         return ' '.join(x for x in all if x != '{}')
 
-# The lock is used in merge_styles function to work around threading concurrency bug of cssutils library.
-# The bug is documented in issue #65. The bug's reproduction test in test_premailer.test_multithreading.
+# The lock is used in merge_styles function to work around threading
+# concurrency bug of cssutils library.
+# The bug is documented in issue #65. The bug's reproduction test in
+# test_premailer.test_multithreading.
 merge_styles._lock = threading.RLock()
+
 
 def make_important(bulk):
     """makes every property in a string !important.
@@ -140,7 +144,7 @@ class Premailer(object):
         self.remove_classes = remove_classes
         # whether to process or ignore selectors like '* { foo:bar; }'
         self.include_star_selectors = include_star_selectors
-        if isinstance(external_styles, basestring):
+        if isinstance(external_styles, str):
             external_styles = [external_styles]
         self.external_styles = external_styles
         self.strip_important = strip_important
@@ -158,7 +162,8 @@ class Premailer(object):
         # empty string
         if not css_body:
             return rules, leftover
-        sheet = cssutils.parseString(css_body, validate=not self.disable_validation)
+        sheet = cssutils.parseString(css_body,
+                                     validate=not self.disable_validation)
         for rule in sheet:
             # handle media rule
             if rule.type == rule.MEDIA_RULE:
@@ -191,7 +196,8 @@ class Premailer(object):
                 class_count = selector.count('.')
                 element_count = len(_element_selector_regex.findall(selector))
 
-                specificity = (id_count, class_count, element_count, ruleset_index, rule_index)
+                specificity = (id_count, class_count, element_count,
+                               ruleset_index, rule_index)
 
                 rules.append((specificity, selector, bulk))
                 rule_index += 1
@@ -236,7 +242,8 @@ class Premailer(object):
                 href = element.attrib.get('href')
                 css_body = self._load_external(href)
 
-            these_rules, these_leftover = self._parse_style_rules(css_body, index)
+            these_rules, these_leftover = self._parse_style_rules(css_body,
+                                                                  index)
             index += 1
             rules.extend(these_rules)
 
@@ -261,7 +268,8 @@ class Premailer(object):
         if self.external_styles:
             for stylefile in self.external_styles:
                 css_body = self._load_external(stylefile)
-                these_rules, these_leftover = self._parse_style_rules(css_body, index)
+                these_rules, these_leftover = self._parse_style_rules(css_body,
+                                                                      index)
                 index += 1
                 rules.extend(these_rules)
                 if these_leftover:
@@ -272,8 +280,9 @@ class Premailer(object):
                     if head:
                         head[0].append(style)
 
-        # rules is a tuple of (specificity, selector, styles), where specificity is a tuple
-        # ordered such that more specific rules sort larger.
+        # rules is a tuple of (specificity, selector, styles), where
+        # specificity is a tuple ordered such that more specific rules sort
+        # larger.
         rules.sort(key=operator.itemgetter(0))
 
         first_time = []
@@ -325,28 +334,28 @@ class Premailer(object):
             for attr in ('href', 'src'):
                 for item in page.xpath("//@%s" % attr):
                     parent = item.getparent()
-                    if attr == 'href' and self.preserve_internal_links \
-                           and parent.attrib[attr].startswith('#'):
+                    if attr == 'href' and self.preserve_internal_links and \
+                            parent.attrib[attr].startswith('#'):
                         continue
-                    if attr == 'src' and self.preserve_inline_attachments \
-                           and parent.attrib[attr].startswith('cid:'):
+                    if attr == 'src' and self.preserve_inline_attachments and \
+                            parent.attrib[attr].startswith('cid:'):
                         continue
                     if not self.base_url.endswith('/'):
                         self.base_url += '/'
-                    parent.attrib[attr] = urlparse.urljoin(self.base_url,
-                        parent.attrib[attr].lstrip('/'))
+                    parent.attrib[attr] = urllib.parse.urljoin(
+                        self.base_url, parent.attrib[attr].lstrip('/'))
 
         kwargs.setdefault('method', self.method)
         kwargs.setdefault('pretty_print', pretty_print)
-        out = etree.tostring(root, **kwargs)
+        out = etree.tostring(root, **kwargs).decode('latin1')
         if self.method == 'xml':
-            out = _cdata_regex.sub(lambda m: '/*<![CDATA[*/%s/*]]>*/' % m.group(1), out)
+            out = _cdata_regex.sub(lambda m: '/*<![CDATA[*/%s/*]]>*/' % m.group(1), out)  # noqa
         if self.strip_important:
             out = _importants.sub('', out)
         return out
 
     def _load_external_url(self, url):
-        r = urllib2.urlopen(url)
+        r = urllib.request.urlopen(url)
         _, params = cgi.parse_header(r.headers.get('Content-Type', ''))
         encoding = params.get('charset', 'utf-8')
         if 'gzip' in r.info().get('Content-Encoding', ''):
@@ -379,7 +388,7 @@ class Premailer(object):
                 with codecs.open(stylefile, encoding='utf-8') as f:
                     css_body = f.read()
             elif self.base_url:
-                url = urlparse.urljoin(self.base_url, url)
+                url = urllib.parse.urljoin(self.base_url, url)
                 return self._load_external(url)
             else:
                 raise ExternalNotFoundError(stylefile)
@@ -396,7 +405,7 @@ class Premailer(object):
         '{color:red; border:1px solid green} :visited{border:1px solid green}'
         """
         if style_content.count('}') and \
-          style_content.count('{') == style_content.count('{'):
+                style_content.count('{') == style_content.count('{'):
             style_content = style_content.split('}')[0][1:]
 
         attributes = {}
@@ -418,7 +427,8 @@ class Premailer(object):
             #    print 'value', repr(value)
 
         for key, value in attributes.items():
-            if key in element.attrib and not force or key in self.disable_basic_attributes:
+            if key in element.attrib and not force or \
+                    key in self.disable_basic_attributes:
                 # already set, don't dare to overwrite
                 continue
             element.attrib[key] = value
@@ -469,4 +479,4 @@ if __name__ == '__main__':  # pragma: no cover
         </body>
         </html>"""
     p = Premailer(html)
-    print p.transform()
+    print(p.transform())
